@@ -1,8 +1,8 @@
 # 참새 사냥 게임 만들기 PROJECT!
 
-**Kotlin team project**\n
-*202511070 정유찬*\n
-*202310873 이주현*\n
+**Kotlin team project**<br>
+*202511070 정유찬* <br>
+*202310873 이주현* <br>
 
 **🐦 참새 사냥 게임**
 
