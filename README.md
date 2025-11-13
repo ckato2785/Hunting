@@ -5,6 +5,7 @@
 *202310873 이주현* <br>
 
 진행해야할 기능
+
     1. 게임 루프 + 스폰 + 이동 + 제거
         1.1 GameView 또는 SurfaceView 생성, 루프(onDraw) 구성
         1.2 deltaTime 계산
