@@ -8,8 +8,8 @@ class ScoreManager {
     var score: Int = 0
         private set // 외부에서 값을 직접 변경하는 것을 방지
 
-    // 2. 총 게임 시간 설정 (예: 60초)
-    private val gameDuration: Float = 60f
+    // 2. 총 게임 시간 설정 (60초 -> 30초로 변경)
+    private val gameDuration: Float = 30f // 30초 스테이지 타이머
 
     // 3. 현재 경과된 게임 시간
     var gameTime: Float = 0f
@@ -34,6 +34,7 @@ class ScoreManager {
 
     // 7. 게임 종료 여부 확인
     fun isTimeUp(): Boolean {
+        // gameTime이 gameDuration과 같아지거나 초과하는 순간 true 반환
         return gameTime >= gameDuration
     }
 
@@ -41,5 +42,8 @@ class ScoreManager {
     fun reset() {
         score = 0
         gameTime = 0f
+
+    // 9. 스테이지 목표 점수 설정 (성공/실패 기준)
+    val targetScore: Int = 100 // 예시: 100점 이상이면 성공
     }
 }
