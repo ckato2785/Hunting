@@ -1,133 +1,151 @@
-package com.example.hunts.engine
+package com.example.hunts // 실제 패키지명으로 변경해주세요
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.RectF
-import android.util.AttributeSet
-import android.view.MotionEvent
+import android.graphics.*
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import com.example.hunts.R // 리소스 파일을 사용하기 위해 R import가 필요합니다. (예시)
+import androidx.core.content.ContextCompat
+import com.example.hunts.engine.GameEngine
+import com.example.hunts.engine.GameState
+import com.example.hunts.engine.StageManager
+import kotlin.random.Random
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import android.util.AttributeSet
+import androidx.core.graphics.drawable.toBitmap
+import com.example.hunts.R // R 클래스 import가 필요합니다.
 
-/**
- * 게임 루프를 실행하는 메인 SurfaceView
- */
-class GameView(context: Context, attrs: AttributeSet? = null) :
-    SurfaceView(context, attrs),
-    SurfaceHolder.Callback,
-    Runnable
-{
+class GameView @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
+) : SurfaceView(context, attrs, defStyleAttr), SurfaceHolder.Callback, Runnable {
 
-    // 1. 변수 정의 및 초기화
-    private lateinit var engine: GameEngine
+    // --- ⭐ [추가/수정] 오류가 나는 변수 선언 ---
+    private var currentBackgroundResId: Int = 0 // 현재 로드된 배경 리소스 ID 저장
+    private var backgroundBitmap: Bitmap? = null // 현재 로드된 배경 이미지 Bitmap 저장
+    // ----------------------------------------
+
     private var isRunning = false
     private var gameThread: Thread? = null
 
-    private var sparrowBitmap: Bitmap? = null
-    private lateinit var defaultBitmap: Bitmap
+    private var engine: GameEngine? = null
 
-    // ⭐ 배경 이미지를 위한 변수 추가
-    private var backgroundBitmap: Bitmap? = null
-    private var currentBackgroundResId: Int = 0 // 현재 로드된 이미지 리소스 ID 추적
+    // 임시 Sparrow 비트맵 (실제 게임 리소스로 대체해야 함)
+    private val sparrowBitmap: Bitmap by lazy {
+        ContextCompat.getDrawable(context, R.drawable.ic_launcher_foreground)?.toBitmap(100, 100)
+            ?: Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+    }
+    private val defaultBitmap: Bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
 
-    // UI 그리기용 Paint 객체
     private val scorePaint = Paint().apply {
         color = Color.WHITE
         textSize = 60f
+        textAlign = Paint.Align.CENTER
         isAntiAlias = true
     }
 
-    private val gameOverPaint = Paint().apply {
-        color = Color.RED
+    private val titlePaint = Paint().apply {
+        color = Color.WHITE
         textSize = 100f
-        isFakeBoldText = true
+        textAlign = Paint.Align.CENTER
         isAntiAlias = true
     }
 
-    private val buttonTextPaint = Paint().apply { // 버튼 텍스트용 Paint
-        color = Color.WHITE
-        textSize = 50f
-        isAntiAlias = true
-        textAlign = Paint.Align.CENTER // 텍스트 중앙 정렬
-    }
-
-    // ⭐ 버튼 배경/테두리 그리기용 Paint 추가
-    private val buttonBackgroundPaint = Paint().apply {
-        color = Color.DKGRAY
-        style = Paint.Style.FILL
-        alpha = 150 // 반투명 배경
-    }
-    private val buttonBorderPaint = Paint().apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 3f
-        alpha = 200 // 반투명 테두리
-    }
-
+    private var restartButtonBounds: Rect? = null
+    private var nextStageButtonBounds: Rect? = null
 
     init {
         holder.addCallback(this)
-
-        try {
-            // 참새 이미지 로드 (android.R.drawable.btn_star_big_on 사용)
-            val tempBitmap = BitmapFactory.decodeResource(resources, android.R.drawable.btn_star_big_on)
-            sparrowBitmap = Bitmap.createScaledBitmap(tempBitmap, 100, 100, false)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        if (sparrowBitmap == null) {
-            defaultBitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
-            defaultBitmap.eraseColor(Color.GRAY)
-            sparrowBitmap = defaultBitmap
+        // 화면 터치 이벤트 리스너 설정
+        setOnTouchListener { _, event ->
+            if (event.action == android.view.MotionEvent.ACTION_DOWN) {
+                engine?.handleTouch(event.x, event.y)
+                true
+            } else {
+                false
+            }
         }
     }
 
-    // ⭐ 배경 이미지 로드 및 리사이즈 함수 추가
+    // ⭐ [수정] 오류가 나는 loadBackground 함수 로직 수정
+    /**
+     * 배경 이미지를 로드하고 currentBackgroundResId와 backgroundBitmap을 업데이트합니다.
+     */
     private fun loadBackground(resId: Int) {
-        if (currentBackgroundResId == resId) return // 이미 로드된 이미지면 건너뜀
-
-        try {
-            val originalBitmap = BitmapFactory.decodeResource(resources, resId)
-            // 화면 크기에 맞게 배경 이미지 크기 조절
-            backgroundBitmap = Bitmap.createScaledBitmap(originalBitmap, width, height, true)
-            originalBitmap.recycle() // 원본 비트맵 메모리 해제
-            currentBackgroundResId = resId
-        } catch (e: Exception) {
-            e.printStackTrace()
-            backgroundBitmap = null // 로드 실패 시 배경 없앰
+        if (resId == 0) {
+            backgroundBitmap = null
             currentBackgroundResId = 0
+            return
+        }
+
+        currentBackgroundResId = resId
+        try {
+            // 리소스 ID로 이미지를 로드하고 화면 크기에 맞게 조정합니다.
+            val drawable = ContextCompat.getDrawable(context, resId)
+            if (drawable != null && width > 0 && height > 0) {
+                backgroundBitmap = drawable.toBitmap(width, height, Bitmap.Config.ARGB_8888)
+            } else {
+                backgroundBitmap = null
+            }
+        } catch (e: Exception) {
+            backgroundBitmap = null
+            // R.drawable.ic_menu_crop 등 안드로이드 내장 드로어블을 임시로 사용했기 때문에 오류가 날 수 있습니다.
+            // 실제 앱에서는 R.drawable.your_image_name 처럼 실제 리소스를 사용해야 합니다.
+            e.printStackTrace()
         }
     }
 
-    // =======================================================
-    // 1. SurfaceHolder.Callback 구현
-    // =======================================================
+    // ⭐ [수정] 오류가 나는 drawBackground 함수 로직 수정
+    /**
+     * 배경을 그리는 함수 (배경 리소스 ID 변경 감지 기능 포함)
+     */
+    private fun drawBackground(canvas: Canvas) {
+        val engine = engine ?: return
+
+        // GameEngine에서 새로운 스테이지가 로드되었는지 확인
+        if (currentBackgroundResId != engine.currentStageData.backgroundResId) {
+            loadBackground(engine.currentStageData.backgroundResId)
+        }
+
+        // 배경 이미지 그리기. 이미지가 로드되지 않았다면 검은색으로 채웁니다.
+        if (backgroundBitmap != null) {
+            // 화면 전체를 덮도록 그립니다.
+            canvas.drawBitmap(
+                bitmap = backgroundBitmap!!,
+                src = Rect(0, 0, backgroundBitmap!!.width, backgroundBitmap!!.height),
+                dst = Rect(0, 0, width, height),
+                paint = null
+            )
+        } else {
+            canvas.drawColor(Color.BLACK)
+        }
+    }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         val finalBitmap = sparrowBitmap ?: defaultBitmap
 
         // GameEngine 초기화
-        // TODO() 제거: width, height, finalBitmap, context를 전달하여 초기화합니다.
-        engine = GameEngine(width, height, finalBitmap, this.context)
+        engine = GameEngine(
+            screenWidth = width,
+            screenHeight = height,
+            sparrowBitmap = finalBitmap,
+            context = this.context
+        )
 
-        // ⭐ 초기 배경 이미지 로드
-        loadBackground(engine.currentStageData.backgroundResId)
+        // ⭐ [수정] 초기 배경 이미지 로드 (engine 초기화 후)
+        engine?.currentStageData?.let {
+            loadBackground(it.backgroundResId)
+        }
 
         isRunning = true
         gameThread = Thread(this).apply { start() }
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        // 화면 크기가 변경될 때 배경 이미지도 다시 로드하여 리사이징합니다.
+        // 화면 크기가 변경될 때 배경 이미지도 다시 로드하며 리사이징합니다.
         if (currentBackgroundResId != 0) {
             loadBackground(currentBackgroundResId)
         }
+        // 버튼 영역도 화면 크기에 맞게 재계산이 필요할 수 있습니다.
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -143,173 +161,104 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
         }
     }
 
-    // =======================================================
-    // 2. Runnable 구현 (게임 루프)
-    // =======================================================
-
     override fun run() {
-        var canvas: Canvas? = null
         while (isRunning) {
-            try {
-                // 1. 게임 로직 업데이트
-                engine.update()
-
-                // 2. 화면 잠그고 그리기 준비
-                canvas = holder.lockCanvas()
-                if (canvas != null) {
+            val canvas = holder.lockCanvas()
+            if (canvas != null) {
+                try {
                     synchronized(holder) {
-
-                        // ⭐ 3. 배경 이미지 그리기
-                        drawBackground(canvas)
-
-                        // 4. 그리기 실행 (엔진의 오브젝트 그리기)
-                        engine.draw(canvas)
-
-                        // 5. UI 그리기 (GameView에서 담당)
-                        drawUI(canvas)
+                        engine?.update()
+                        drawGame(canvas)
                     }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                // 6. 화면 해제 및 표시
-                if (canvas != null) {
+                } finally {
                     holder.unlockCanvasAndPost(canvas)
                 }
             }
         }
     }
 
-    // ⭐ 배경을 그리는 새로운 함수
-    private fun drawBackground(canvas: Canvas) {
-        // GameEngine에서 새로운 스테이지가 로드되었는지 확인
-        if (currentBackgroundResId != engine.currentStageData.backgroundResId) {
-            loadBackground(engine.currentStageData.backgroundResId)
-        }
-
-        // 배경 이미지 그리기. 이미지가 로드되지 않았다면 검은색으로 채웁니다.
-        if (backgroundBitmap != null) {
-            canvas.drawBitmap(backgroundBitmap!!, 0f, 0f, null)
-        } else {
-            canvas.drawColor(Color.BLACK)
-        }
-    }
-
-    /**
-     * 점수판 및 게임 오버 화면을 그리는 함수 (GameView의 핵심 UI 로직)
-     * (3.1~3.6 기능이 이 함수에 대부분 구현되어 있습니다.)
-     */
-    private fun drawUI(canvas: Canvas) {
-        val score = engine.scoreManager.score
-        val timeLeft = engine.scoreManager.timeLeft // 3.1 타이머 표시
+    private fun drawGame(canvas: Canvas) {
+        val engine = engine ?: return
+        val gameManager = engine.scoreManager
         val gameState = engine.gameState
 
-        // 1. 점수 및 남은 시간 표시
-        canvas.drawText("SCORE: $score", 50f, 70f, scorePaint)
-        canvas.drawText("TIME: $timeLeft s", width - 300f, 70f, scorePaint)
+        // 1. 배경 그리기
+        drawBackground(canvas)
 
-        // ⭐ 현재 스테이지 번호 표시 추가
-        canvas.drawText("STAGE: ${engine.currentStageIndex}", width / 2f - 100f, 70f, scorePaint)
+        // 2. 오브젝트 그리기
+        engine.draw(canvas)
 
-        // 2. 게임 종료 화면 (3.2 시간 0초 시 END 상태)
+        // 3. 점수 및 남은 시간 표시
+        canvas.drawText("SCORE: ${gameManager.score}", 50f, 70f, scorePaint)
+        canvas.drawText("TIME: ${gameManager.timeLeftFormatted} s", width - 50f, 70f, scorePaint.apply { textAlign = Paint.Align.RIGHT })
+
+        // ⭐ [수정] 현재 스테이지 번호 표시 추가 (오류 해결)
+        canvas.drawText("STAGE: ${engine.currentStageIndex}", width / 2f, 70f, scorePaint.apply { textAlign = Paint.Align.CENTER })
+
+        // 4. 게임 종료 화면 (3.2초 시점 END 상태)
         if (gameState == GameState.END) {
-
-            // 3.6 화면 전환 애니메이션 (페이드 효과)
-            val fadeProgress = (engine.endScreenTimer / engine.FADE_DURATION).coerceIn(0f, 1f)
-            val alpha = (fadeProgress * 180).toInt() // 최대 불투명도 180
+            // 4.1. 화면 전환 애니메이션 (페이드 효과)
+            val fadeProgress = engine.endScreenTimer / engine.FADE_DURATION.coerceIn(0.1f, 1f)
+            val alpha = (fadeProgress.coerceIn(0f, 1f) * 180).toInt() // 최대 불투명도 180
             canvas.drawColor(Color.argb(alpha, 0, 0, 0))
 
-            if (engine.endScreenTimer > 0.5f) {
-
+            if (engine.endScreenTimer > 0.5f) { // 페이드가 어느 정도 진행된 후 텍스트 표시
                 val isLastStage = StageManager.isLastStage(engine.currentStageIndex)
+                val isSuccess = engine.isStageSuccess
 
-                // 2-1. 성공/실패 텍스트 (타이틀) (3.3 기준 점수 달성 텍스트)
-                val resultText = if (engine.isStageSuccess) {
-                    if (isLastStage) "최종 승리!" else "성공!"
-                } else "실패"
+                // 4.2. 성공/실패 텍스트 (타이틀)
+                val resultText = when {
+                    isSuccess && isLastStage -> "최종 승리!"
+                    isSuccess -> "스테이지 성공!"
+                    else -> "실패..."
+                }
+                canvas.drawText(resultText, width / 2f, height / 2f - 150f, titlePaint)
 
-                val resultPaint = if (engine.isStageSuccess) gameOverPaint.apply { color = Color.YELLOW }
-                else gameOverPaint.apply { color = Color.RED }
+                // 4.3. 점수 표시
+                canvas.drawText("점수: ${gameManager.score} / ${gameManager.targetScore}", width / 2f, height / 2f, scorePaint)
+                canvas.drawText("최고 점수: ${engine.highestScore}", width / 2f, height / 2f + 80f, scorePaint)
 
-                var bounds = Rect()
-                resultPaint.getTextBounds(resultText, 0, resultText.length, bounds)
-                val xResult = (width / 2f) - (bounds.width() / 2f)
-                val yResult = (height / 2f) - 250f
-                canvas.drawText(resultText, xResult, yResult, resultPaint)
+                // 4.4. 버튼 그리기
+                val buttonHeight = 120
+                val buttonWidth = 350
+                val padding = 50
+                val centerY = height / 2f + 250f
 
-                // 2-2. 최종 점수 및 목표 점수 표시
-                val textCurrentScore = "최종 점수: $score / 목표: ${engine.scoreManager.targetScore}"
-                scorePaint.getTextBounds(textCurrentScore, 0, textCurrentScore.length, bounds)
-                val xCurrentScore = (width / 2f) - (bounds.width() / 2f)
-                val yCurrentScore = yResult + 100f
-                canvas.drawText(textCurrentScore, xCurrentScore, yCurrentScore, scorePaint)
+                // 버튼 그리기 Paint
+                val buttonPaint = Paint().apply {
+                    color = Color.parseColor("#4CAF50") // 녹색 배경
+                    style = Paint.Style.FILL
+                }
+                val textPaint = Paint().apply {
+                    color = Color.WHITE
+                    textSize = 50f
+                    textAlign = Paint.Align.CENTER
+                    isAntiAlias = true
+                }
 
-                // 2-3. 최고 점수 표시 (3.4 최고 점수)
-                val textHighestScore = "최고 점수: ${engine.highestScore}"
-                scorePaint.getTextBounds(textHighestScore, 0, textHighestScore.length, bounds)
-                val xHighestScore = (width / 2f) - (bounds.width() / 2f)
-                val yHighestScore = yCurrentScore + 70f
-                canvas.drawText(textHighestScore, xHighestScore, yHighestScore, scorePaint)
+                // Restart 버튼 영역
+                val restartLeft = width / 2 - buttonWidth - padding / 2
+                val restartRight = width / 2 - padding / 2
+                val restartTop = (centerY - buttonHeight / 2).toInt()
+                val restartBottom = (centerY + buttonHeight / 2).toInt()
+                restartButtonBounds = Rect(restartLeft, restartTop, restartRight, restartBottom)
+                canvas.drawRect(restartButtonBounds!!, buttonPaint.apply { color = Color.RED })
+                canvas.drawText("다시 하기", restartButtonBounds!!.centerX().toFloat(), restartButtonBounds!!.centerY().toFloat() + 15f, textPaint)
 
-                // 2-4. 버튼 그리기: 다시 시작 / 다음 스테이지 (3.5 버튼 처리)
-                val buttonY = height / 2f + 200f
-                val buttonWidth = 300
-                val buttonHeight = 80
-                val buttonMargin = 100
+                // Next Stage / Restart 버튼 영역
+                val nextLeft = width / 2 + padding / 2
+                val nextRight = width / 2 + buttonWidth + padding / 2
+                nextStageButtonBounds = Rect(nextLeft, restartTop, nextRight, restartBottom)
 
-                // 다시 시작 버튼 (좌측)
-                val xRestartBtn = width / 2f - buttonWidth - buttonMargin / 2f
-                val yRestartBtn = buttonY
+                val nextButtonText = if (isSuccess && !isLastStage) "다음 스테이지" else "재도전"
+                val nextButtonColor = if (isSuccess) Color.parseColor("#2196F3") else Color.parseColor("#FF9800") // 파란색 또는 주황색
+                canvas.drawRect(nextStageButtonBounds!!, buttonPaint.apply { color = nextButtonColor })
+                canvas.drawText(nextButtonText, nextStageButtonBounds!!.centerX().toFloat(), nextStageButtonBounds!!.centerY().toFloat() + 15f, textPaint)
 
-                val restartButtonBounds = Rect(
-                    xRestartBtn.toInt(),
-                    (yRestartBtn - buttonHeight / 2f).toInt(),
-                    (xRestartBtn + buttonWidth).toInt(),
-                    (yRestartBtn + buttonHeight / 2f).toInt()
-                )
-                val restartButtonRectF = RectF(restartButtonBounds)
 
-                canvas.drawRoundRect(restartButtonRectF, 10f, 10f, buttonBackgroundPaint)
-                canvas.drawRoundRect(restartButtonRectF, 10f, 10f, buttonBorderPaint)
-                canvas.drawText("다시 시작", xRestartBtn + buttonWidth / 2f, yRestartBtn + buttonHeight * 0.35f, buttonTextPaint)
-
-                // 다음 스테이지 버튼 (우측) - 조건에 따라 텍스트 변경
-                val nextButtonText = if (engine.isStageSuccess && !isLastStage) "다음 스테이지"
-                else "다시 시작" // 실패했거나 마지막 스테이지면 재시작 버튼 역할
-
-                val xNextStageBtn = width / 2f + buttonMargin / 2f
-                val yNextStageBtn = buttonY
-
-                val nextStageButtonBounds = Rect(
-                    xNextStageBtn.toInt(),
-                    (yNextStageBtn - buttonHeight / 2f).toInt(),
-                    (xNextStageBtn + buttonWidth).toInt(),
-                    (yNextStageBtn + buttonHeight / 2f).toInt()
-                )
-                val nextStageButtonRectF = RectF(nextStageButtonBounds)
-
-                canvas.drawRoundRect(nextStageButtonRectF, 10f, 10f, buttonBackgroundPaint)
-                canvas.drawRoundRect(nextStageButtonRectF, 10f, 10f, buttonBorderPaint)
-                canvas.drawText(nextButtonText, xNextStageBtn + buttonWidth / 2f, yNextStageBtn + buttonHeight * 0.35f, buttonTextPaint)
-
-                // 엔진에 버튼 영역 정보 전달 (터치 처리에 사용)
+                // GameEngine에 버튼 영역 업데이트
                 engine.setButtonBounds(restartButtonBounds, nextStageButtonBounds)
             }
-        } else {
-            // 게임 RUNNING 상태일 때는 버튼 영역을 초기화
-            engine.setButtonBounds(null, null)
         }
-    }
-
-    // =======================================================
-    // 3. 터치 이벤트 처리
-    // =======================================================
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_DOWN) {
-            engine.handleTouch(event.x, event.y)
-            return true
-        }
-        return super.onTouchEvent(event)
     }
 }
