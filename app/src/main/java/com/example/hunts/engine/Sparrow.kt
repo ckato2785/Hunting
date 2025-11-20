@@ -53,7 +53,9 @@ class Sparrow(
     }
 
     override fun update(deltaTime: Float) {
+        // (속도 * cos(각도)) * 델타타임 -> x축 이동
         x += (speed * cos(angle)) * deltaTime
+        // (속도 * sin(각도)) * 델타타임 -> y축 이동
         y += (speed * sin(angle)) * deltaTime
     }
 

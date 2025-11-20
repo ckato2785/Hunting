@@ -15,14 +15,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // 1. GameView 인스턴스 생성
-        // 'this'는 Context 역할을 합니다. GameView는 context만 받는 생성자를 사용합니다.
         gameView = GameView(context = this)
 
         // 2. GameView를 액티비티의 전체 콘텐츠 뷰로 설정
-        // 이 한 줄이 기존의 모든 Compose 코드를 대체하며, GameView가 화면을 차지하게 됩니다.
         setContentView(gameView)
-
-        // 참고: enableEdgeToEdge() 등 Compose 관련 함수는 모두 제거했습니다.
     }
 
     // Activity 라이프사이클 관리를 위해 onPause와 onResume 추가 (선택 사항이지만 중요)

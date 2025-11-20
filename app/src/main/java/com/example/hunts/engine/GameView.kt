@@ -14,6 +14,22 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import com.example.hunts.R // 리소스 파일을 사용하기 위해 R import가 필요합니다. (예시)
 
+// ⭐ 임시 R 클래스 정의: 실제 안드로이드 환경에서는 R.drawable이 자동 생성됩니다.
+// 현재 Canvas 환경에서 컴파일을 위해 임시로 정의합니다.
+// 실제 프로젝트에선 제거하세요.
+class R {
+    class drawable {
+        companion object {
+            // StageManager에서 사용하는 ID와 일치하도록 임시 정의
+            const val placeholder_background_1 = 1001
+            const val placeholder_background_2 = 1002
+            const val placeholder_background_3 = 1003
+        }
+    }
+}
+// ⭐ R 임시 정의 끝
+
+
 /**
  * 게임 루프를 실행하는 메인 SurfaceView
  */
@@ -90,17 +106,21 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
 
     // ⭐ 배경 이미지 로드 및 리사이즈 함수 추가
     private fun loadBackground(resId: Int) {
-        if (currentBackgroundResId == resId) return // 이미 로드된 이미지면 건너뜀
+        // 임시 ID (1001, 1002 등)는 실제 리소스 ID가 아니므로 로드가 불가능합니다.
+        // 실제 프로젝트에서는 resId를 사용하여 리소스를 로드합니다.
+        // 여기서는 에러를 피하기 위해 실제 로직을 주석 처리하고 배경 색만 설정합니다.
+
+        if (currentBackgroundResId == resId) return
 
         try {
-            val originalBitmap = BitmapFactory.decodeResource(resources, resId)
-            // 화면 크기에 맞게 배경 이미지 크기 조절
-            backgroundBitmap = Bitmap.createScaledBitmap(originalBitmap, width, height, true)
-            originalBitmap.recycle() // 원본 비트맵 메모리 해제
+            // FIXME: 실제 프로젝트에서 주석 해제 및 R.drawable.xxx 사용
+            // val originalBitmap = BitmapFactory.decodeResource(resources, resId)
+            // backgroundBitmap = Bitmap.createScaledBitmap(originalBitmap, width, height, true)
+            // originalBitmap.recycle()
             currentBackgroundResId = resId
         } catch (e: Exception) {
             e.printStackTrace()
-            backgroundBitmap = null // 로드 실패 시 배경 없앰
+            backgroundBitmap = null
             currentBackgroundResId = 0
         }
     }
@@ -113,7 +133,6 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
         val finalBitmap = sparrowBitmap ?: defaultBitmap
 
         // GameEngine 초기화
-        // TODO() 제거: width, height, finalBitmap, context를 전달하여 초기화합니다.
         engine = GameEngine(width, height, finalBitmap, this.context)
 
         // ⭐ 초기 배경 이미지 로드
@@ -187,21 +206,28 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
             loadBackground(engine.currentStageData.backgroundResId)
         }
 
-        // 배경 이미지 그리기. 이미지가 로드되지 않았다면 검은색으로 채웁니다.
+        // 배경 이미지 그리기. 이미지가 로드되지 않았다면 스테이지 ID에 따라 색상만 다르게 표시합니다.
         if (backgroundBitmap != null) {
             canvas.drawBitmap(backgroundBitmap!!, 0f, 0f, null)
         } else {
-            canvas.drawColor(Color.BLACK)
+            // 임시 배경 색상 (스테이지별로 다르게)
+            val bgColor = when (engine.currentStageIndex) {
+                1 -> Color.rgb(0, 50, 0)
+                2 -> Color.rgb(50, 0, 50)
+                3 -> Color.rgb(0, 0, 50)
+                else -> Color.BLACK
+            }
+            canvas.drawColor(bgColor)
         }
     }
 
     /**
-     * 점수판 및 게임 오버 화면을 그리는 함수 (GameView의 핵심 UI 로직)
-     * (3.1~3.6 기능이 이 함수에 대부분 구현되어 있습니다.)
+     * 점수판 및 게임 오버 화면을 그리는 함수 (3.1~3.6 기능 구현)
      */
     private fun drawUI(canvas: Canvas) {
         val score = engine.scoreManager.score
-        val timeLeft = engine.scoreManager.timeLeft // 3.1 타이머 표시
+        // 3.1 타이머 표시 (Int로 반올림된 시간)
+        val timeLeft = engine.scoreManager.timeLeft
         val gameState = engine.gameState
 
         // 1. 점수 및 남은 시간 표시
@@ -209,9 +235,13 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
         canvas.drawText("TIME: $timeLeft s", width - 300f, 70f, scorePaint)
 
         // ⭐ 현재 스테이지 번호 표시 추가
-        canvas.drawText("STAGE: ${engine.currentStageIndex}", width / 2f - 100f, 70f, scorePaint)
+        val stageText = "STAGE: ${engine.currentStageIndex} / ${StageManager.totalStages}"
+        val boundsStage = Rect()
+        scorePaint.getTextBounds(stageText, 0, stageText.length, boundsStage)
+        canvas.drawText(stageText, width / 2f - boundsStage.width() / 2f, 70f, scorePaint)
 
-        // 2. 게임 종료 화면 (3.2 시간 0초 시 END 상태)
+
+        // 2. 게임 종료 화면 (3.2, 3.3, 3.4, 3.5, 3.6 구현)
         if (gameState == GameState.END) {
 
             // 3.6 화면 전환 애니메이션 (페이드 효과)
@@ -219,14 +249,17 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
             val alpha = (fadeProgress * 180).toInt() // 최대 불투명도 180
             canvas.drawColor(Color.argb(alpha, 0, 0, 0))
 
+            // 페이드 인이 어느 정도 진행된 후 UI 표시
             if (engine.endScreenTimer > 0.5f) {
 
                 val isLastStage = StageManager.isLastStage(engine.currentStageIndex)
 
                 // 2-1. 성공/실패 텍스트 (타이틀) (3.3 기준 점수 달성 텍스트)
-                val resultText = if (engine.isStageSuccess) {
-                    if (isLastStage) "최종 승리!" else "성공!"
-                } else "실패"
+                val resultText = when {
+                    engine.isStageSuccess && isLastStage -> "최종 승리!"
+                    engine.isStageSuccess -> "성공!"
+                    else -> "실패"
+                }
 
                 val resultPaint = if (engine.isStageSuccess) gameOverPaint.apply { color = Color.YELLOW }
                 else gameOverPaint.apply { color = Color.RED }
@@ -257,7 +290,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
                 val buttonHeight = 80
                 val buttonMargin = 100
 
-                // 다시 시작 버튼 (좌측)
+                // 🔴 다시 시작 버튼 (좌측)
                 val xRestartBtn = width / 2f - buttonWidth - buttonMargin / 2f
                 val yRestartBtn = buttonY
 
@@ -273,9 +306,9 @@ class GameView(context: Context, attrs: AttributeSet? = null) :
                 canvas.drawRoundRect(restartButtonRectF, 10f, 10f, buttonBorderPaint)
                 canvas.drawText("다시 시작", xRestartBtn + buttonWidth / 2f, yRestartBtn + buttonHeight * 0.35f, buttonTextPaint)
 
-                // 다음 스테이지 버튼 (우측) - 조건에 따라 텍스트 변경
+                // 🟢 다음 스테이지 버튼 (우측) - 조건에 따라 텍스트 변경
                 val nextButtonText = if (engine.isStageSuccess && !isLastStage) "다음 스테이지"
-                else "다시 시작" // 실패했거나 마지막 스테이지면 재시작 버튼 역할
+                else "재도전" // 실패했거나 마지막 스테이지면 재도전 버튼 역할
 
                 val xNextStageBtn = width / 2f + buttonMargin / 2f
                 val yNextStageBtn = buttonY
