@@ -26,6 +26,11 @@ class ScoreManager {
     val timeLeftFormatted: String
         get() = String.format("%.1f", timeLeft)
 
+    // 4. 남은 시간 (computed property)
+    // GameView에서 UI 표시를 위해 Int 형으로 반환
+    val timeLeft: Int
+        get() = (gameDuration - gameTime).coerceAtLeast(0f).toInt()
+
     // 5. 점수 추가 메서드
     fun addScore(points: Int) {
         score += points
@@ -42,6 +47,9 @@ class ScoreManager {
     fun isTimeUp(): Boolean {
         return gameTime >= gameDuration
     }
+
+    // 8. 스테이지 목표 점수 설정 (성공/실패 기준)
+    val targetScore: Int = 100 // 예시: 100점 이상이면 성공
 
     // 9. 게임 상태 재설정
     fun reset() {
