@@ -1,62 +1,58 @@
 package com.example.hunts.engine
 
 /**
- * 게임의 점수, 시간 등 메타 정보를 관리하는 클래스
+ * 게임의 점수와 시간을 관리하는 클래스입니다.
  */
 class ScoreManager {
     var score: Int = 0
-        private set
+    var remainingTime: Float = 0f
+    private var maxTime: Float = 0f
 
-    // ⭐ 목표 점수를 var로 변경하여 GameEngine에서 스테이지 로드 시 설정할 수 있도록 합니다.
-    var targetScore: Int = 100
-
-    // 2. 총 게임 시간 설정 (60초로 통일)
-    var gameDuration: Float = 60f
-        private set
-
-    // 3. 현재 경과된 게임 시간 (ScoreManager는 경과 시간을 추적)
-    var gameTime: Float = 0f
-        private set
-
-    // ⭐ 남은 시간 (Float으로 반환)
-    val timeLeftInSeconds: Float
-        get() = (gameDuration - gameTime).coerceAtLeast(0f)
-
-    // ⭐ GameView에서 소수점 한 자리 표시를 위해 사용
+    /**
+     * 남은 시간을 소수점 첫째 자리까지 포맷한 문자열로 반환합니다. (예: 29.5)
+     */
     val timeLeftFormatted: String
-        get() = String.format("%.1f", timeLeftInSeconds)
+        get() = String.format("%.1f", remainingTime)
 
-    // 4. 남은 시간 (Int 형으로 반환 - GameView에서 사용하던 속성)
-    val timeLeft: Int
-        get() = timeLeftInSeconds.toInt()
-
-    // 5. 점수 추가 메서드
-    fun addScore(points: Int) {
-        score += points
+    /**
+     * 현재 스테이지의 데이터로 매니저를 초기화합니다.
+     */
+    fun setStageData(duration: Float, targetScore: Int) {
+        maxTime = duration
+        remainingTime = duration
     }
 
-    // 6. 시간 업데이트 메서드
+    /**
+     * 점수를 추가하거나 차감합니다.
+     */
+    fun addScore(value: Int) {
+        score += value
+    }
+
+    /**
+     * 시간을 업데이트합니다.
+     */
     fun updateTime(deltaTime: Float) {
-        if (gameTime < gameDuration) {
-            gameTime += deltaTime
+        if (remainingTime > 0) {
+            remainingTime -= deltaTime
+            if (remainingTime < 0) {
+                remainingTime = 0f
+            }
         }
     }
 
-    // 7. 게임 종료 여부 확인
+    /**
+     * 시간이 모두 소진되었는지 확인합니다.
+     */
     fun isTimeUp(): Boolean {
-        return gameTime >= gameDuration
+        return remainingTime <= 0f
     }
 
-    // ⭐ 8. 스테이지 데이터에 따라 초기화 (GameEngine에서 호출)
-    fun setStageData(duration: Float, target: Int) {
-        gameDuration = duration
-        targetScore = target
-        reset()
-    }
-
-    // 9. 게임 상태 재설정
-    fun reset() {
+    /**
+     * 점수와 시간을 초기 상태로 재설정합니다.
+     */
+    fun reset(gameDuration: Float) {
         score = 0
-        gameTime = 0f
+        remainingTime = maxTime
     }
 }

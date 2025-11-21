@@ -8,9 +8,9 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * 참새(Sparrow) 오브젝트입니다. (클릭 시 +5점, 화면 밖으로 나가면 라이프 감소)
+ * 까치(Magpie) 오브젝트입니다. (클릭 시 -4점)
  */
-class Sparrow(
+class Magpie(
     private val screenWidth: Int,
     private val screenHeight: Int,
     private val bitmap: Bitmap,
@@ -27,7 +27,7 @@ class Sparrow(
 
     init {
         // 중앙 방향으로 이동하도록 각도 계산
-        val offsetAngleRange = Math.PI.toFloat() / 6f // 중앙 방향에서 ±30도 범위
+        val offsetAngleRange = Math.PI.toFloat() / 6f
 
         // 1. 화면 외곽에서 랜덤하게 스폰 위치를 결정합니다.
         val side = Random.nextInt(4)
@@ -36,25 +36,21 @@ class Sparrow(
             0 -> { // 위쪽 외곽
                 x = Random.nextFloat() * screenWidth
                 y = objectStartY.toFloat() + height / 2
-                // 중앙을 향하는 각도 (90도)를 기준으로 오프셋
                 angle = Math.PI.toFloat() / 2f + Random.nextFloat() * offsetAngleRange * 2 - offsetAngleRange
             }
             1 -> { // 오른쪽 외곽
                 x = screenWidth + width / 2
                 y = objectStartY + Random.nextFloat() * (screenHeight - objectStartY)
-                // 중앙을 향하는 각도 (180도)를 기준으로 오프셋
                 angle = Math.PI.toFloat() + Random.nextFloat() * offsetAngleRange * 2 - offsetAngleRange
             }
             2 -> { // 아래쪽 외곽
                 x = Random.nextFloat() * screenWidth
                 y = screenHeight + height / 2
-                // 중앙을 향하는 각도 (270도 또는 -90도)를 기준으로 오프셋
                 angle = -Math.PI.toFloat() / 2f + Random.nextFloat() * offsetAngleRange * 2 - offsetAngleRange
             }
             else -> { // 왼쪽 외곽
                 x = -width / 2
                 y = objectStartY + Random.nextFloat() * (screenHeight - objectStartY)
-                // 중앙을 향하는 각도 (0도)를 기준으로 오프셋
                 angle = Random.nextFloat() * offsetAngleRange * 2 - offsetAngleRange
             }
         }
@@ -85,6 +81,6 @@ class Sparrow(
     }
 
     override fun getScoreValue(): Int {
-        return 5 // 참새는 +5점
+        return -4 // 까치는 -4점
     }
 }

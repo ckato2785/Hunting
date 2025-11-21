@@ -1,273 +1,321 @@
 package com.example.hunts.engine
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Rect
-import android.content.SharedPreferences
+import android.util.Log
+import com.example.hunts.model.Bunting
+import com.example.hunts.model.Magpie
+import com.example.hunts.model.Sparrow
+import kotlin.random.Random
 
+/**
+ * 게임 상태를 정의합니다.
+ */
 enum class GameState {
-    RUNNING, PAUSED, END
+    RUNNING, // 게임이 실행 중
+    PAUSED,  // 일시정지
+    END,     // 게임 종료 (시간 초과 또는 라이프 0)
+    READY    // 게임 시작 대기 상태
 }
 
+/**
+ * 게임의 핵심 로직 (업데이트 및 그리기)을 담당합니다.
+ * @param screenWidth 화면 너비 (픽셀)
+ * @param screenHeight 화면 높이 (픽셀)
+ * @param birdBitmaps 모든 새 이미지를 담은 맵
+ */
 class GameEngine(
     val screenWidth: Int,
     val screenHeight: Int,
-    private val sparrowBitmap: Bitmap, // Sparrow 객체 생성 시 전달할 Bitmap
-    private val context: Context
+    private val birdBitmaps: Map<Int, Bitmap>
 ) {
-    // Stage Management Variables (스테이지 관리 변수)
+    /** UI가 페이드 인/아웃 되는 시간 (초) */
+    val FADE_DURATION = 0.5f
+
+    // Bird ID (MainActivity에서 사용한 R.drawable ID와 일치해야 합니다.)
+    private val SPARROW_ID = 1
+    private val BUNTING_ID = 2
+    private val MAGPIE_ID = 3
+
+
+    // 상단 UI 바 높이. 오브젝트 스폰 Y 좌표의 최솟값으로 사용됩니다.
+    private var objectStartY: Int = 0
+
+    // 활성화된 모든 게임 오브젝트를 저장하는 리스트
+    private val activeObjects = mutableListOf<GameObject>()
+
+    val scoreManager = ScoreManager()
     var currentStageIndex: Int = 1
-    // StageData: loadStage에서 초기화됩니다. (StageManager 클래스가 필요합니다)
+    var isStageSuccess: Boolean = false
+    // 현재 스테이지 데이터를 저장합니다. loadStage 호출 시 초기화됩니다.
     lateinit var currentStageData: StageData
 
-    // ⭐ 2. 클래스 상태 변수 (private set 접근자를 정확히 사용)
-    var highestScore: Int = 0
-        private set
-    var isStageSuccess: Boolean = false
-        private set
-    var endScreenTimer: Float = 0f
-    val FADE_DURATION = 1.0f
-
-    private val activeObjects = mutableListOf<GameObject>()
-    var gameState: GameState = GameState.RUNNING
+    // UI 및 시간 관리 변수
+    var gameState: GameState = GameState.READY
     private var lastUpdateTime = System.currentTimeMillis()
-
-    // ScoreManager 인스턴스
-    val scoreManager = ScoreManager()
-
+    // 오브젝트 명중 시 호출될 콜백 함수
     var onObjectHit: ((GameObject) -> Unit)? = null
-
+    // 게임 종료 화면에서 터치 입력을 지연시키기 위한 타이머
+    var endScreenTimer: Float = 0f
+    // 새 스폰 주기 관리를 위한 타이머
     private var spawnTimer = 0f
-    // ⭐ spawnInterval 대신 currentStageData.spawnInterval을 사용합니다.
 
-    private val PREFS_NAME = "HuntsPrefs"
-    private val HIGH_SCORE_KEY = "high_score"
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    // 버튼 영역 변수
-    private var restartBounds: Rect? = null
-    private var nextStageBounds: Rect? = null
-
+    // 버튼 영역 (GameView에서 설정)
+    private var prevStageButtonBounds: Rect? = null
+    private var nextStageButtonBounds: Rect? = null
+    private var pauseButtonBounds: Rect? = null
 
     init {
         this.onObjectHit = { obj ->
             scoreManager.addScore(obj.getScoreValue())
         }
-        loadHighestScore()
-        // ⭐ 초기화 시 Stage 1을 로드하여 게임을 시작합니다.
-        loadStage(1)
-    }
-
-    /**
-     * 스테이지 상태를 포함한 모든 게임 변수를 초기화합니다.
-     */
-    private fun resetGameStates() {
-        scoreManager.reset() // 점수 및 타이머 초기화
-        activeObjects.clear() // 활성 오브젝트 모두 제거
-        gameState = GameState.RUNNING // RUNNING 상태로 전환
-        isStageSuccess = false
-        endScreenTimer = 0f
-        lastUpdateTime = System.currentTimeMillis()
-        spawnTimer = 0f // 스폰 타이머 초기화
-    }
-
-    /**
-     * 주어진 인덱스의 스테이지 데이터를 로드하고 게임 상태를 재설정합니다.
-     */
-    fun loadStage(index: Int) {
-        currentStageIndex = index
-        // StageManager (별도 구현 필요)를 통해 스테이지 데이터를 가져옵니다.
-        currentStageData = StageManager.getStageData(index)
-
-        // ⭐ 핵심 게임 상태 초기화
-        resetGameStates()
-
-        // 스테이지별 시간 및 목표 점수 설정
-        scoreManager.setStageData(currentStageData.gameDuration, currentStageData.targetScore)
-
-        // 초기 스패로우 스폰
-        spawnSparrow()
-        spawnSparrow()
-    }
-
-    /**
-     * 다음 스테이지를 로드합니다. 마지막 스테이지일 경우 Stage 1로 돌아갑니다.
-     */
-    fun loadNextStage() {
-        if (currentStageIndex < StageManager.totalStages) {
-            loadStage(currentStageIndex + 1)
-        } else {
-            // 마지막 스테이지 완료: Stage 1로 돌아가거나 최종 화면 표시 (여기서는 Stage 1로 복귀)
-            loadStage(1)
-        }
-    }
-
-    /**
-     * 현재 스테이지를 재시작합니다.
-     */
-    fun resetCurrentStage() {
         loadStage(currentStageIndex)
     }
 
+    // =======================================================
+    // 1. UI 연동 함수 (상단 UI 높이 설정)
+    // =======================================================
 
+    /**
+     * GameView에서 상단 UI 바 높이를 설정하여 오브젝트 스폰 Y 좌표의 최솟값을 조정합니다.
+     */
+    fun setTopUiBarHeight(height: Int) {
+        this.objectStartY = height
+        Log.d("GameEngine", "Object spawn Y adjusted to: $objectStartY")
+    }
+
+    /**
+     * GameView에서 버튼 영역을 설정합니다.
+     */
+    fun setStageButtonBounds(prevBtn: Rect?, nextBtn: Rect?, pauseBtn: Rect? = null) {
+        this.prevStageButtonBounds = prevBtn
+        this.nextStageButtonBounds = nextBtn
+        this.pauseButtonBounds = pauseBtn
+    }
+
+    // =======================================================
+    // 2. 스테이지 관리
+    // =======================================================
+
+    /**
+     * 특정 스테이지 번호의 데이터를 로드하고 게임 상태를 초기화합니다.
+     */
+    fun loadStage(stageIndex: Int) {
+        currentStageIndex = stageIndex
+        currentStageData = StageManager.getStageData(stageIndex)
+
+        // 스테이지 초기화
+        activeObjects.clear()
+
+        // **오류 수정 부분 1:** StageData의 'gameDuration' 속성을 사용하여 시간 초기화
+        // StageData 클래스에 gameDuration 속성이 정의되어 있어야 합니다.
+        scoreManager.reset(currentStageData.gameDuration)
+
+        gameState = GameState.READY
+        spawnTimer = 0f
+        endScreenTimer = 0f
+        isStageSuccess = false
+    }
+
+    // =======================================================
+    // 3. 게임 업데이트 (매 프레임)
+    // =======================================================
+
+    /**
+     * 게임 로직을 업데이트합니다. (물리, 시간, 스폰)
+     */
     fun update() {
         val currentTime = System.currentTimeMillis()
-        val deltaTime = (currentTime - lastUpdateTime) / 1000f
-        lastUpdateTime = currentTime
+        val deltaTime = (currentTime - lastUpdateTime) / 1000f // 초 단위
 
-        // 1. END 상태 처리 (가장 먼저 실행)
-        if (gameState == GameState.END) {
-            // 게임 오버 상태일 때는 페이드 타이머만 업데이트합니다.
-            if (endScreenTimer < FADE_DURATION) {
-                endScreenTimer += deltaTime
-            }
-            return // END 상태에서는 추가적인 게임 로직 실행 중단
-        }
-
-        // 2. RUNNING 상태일 때 시간 업데이트 및 게임 종료 확인
         if (gameState == GameState.RUNNING) {
+            // RUNNING 상태일 때만 시간을 업데이트하고 deltaTime을 소비합니다.
+            lastUpdateTime = currentTime
 
+            // 시간 감소
             scoreManager.updateTime(deltaTime)
 
-            if (scoreManager.isTimeUp()) {
-                // 게임 종료 로직: END 상태로 전환
-                gameState = GameState.END
-                activeObjects.clear()
-                endScreenTimer = 0f // 타이머 초기화 (페이드 인 시작)
-                processGameResult()
+            // 스폰 타이머 업데이트 및 새 스폰
+            spawnTimer += deltaTime
 
-                // END 상태로 전환되었으므로, 다음 프레임부터 END 상태 로직 실행
-                return
+            // StageData의 spawnInterval 속성 사용
+            if (spawnTimer >= currentStageData.spawnInterval) {
+                // StageData의 개별 속도 값을 spawnBird에 전달
+                spawnBird(
+                    currentStageData.sparrowSpeed,
+                    currentStageData.buntingSpeed,
+                    currentStageData.magpieSpeed
+                )
+                spawnTimer = 0f
             }
+
+            // 오브젝트 이동 및 경계 처리
+            val iterator = activeObjects.iterator()
+            while (iterator.hasNext()) {
+                val obj = iterator.next()
+                obj.update(deltaTime)
+                // 화면 밖으로 나가면 제거 (GameObject의 y는 Float 타입)
+                if (obj.y > screenHeight) {
+                    iterator.remove()
+                }
+            }
+
+            // 게임 오버 조건 확인 (시간 초과)
+            if (scoreManager.remainingTime <= 0f) {
+                endGame()
+            }
+
+        } else if (gameState == GameState.END) {
+            // 게임 종료 화면 타이머 업데이트 (터치 입력 활성화 지연용)
+            val endDeltaTime = (currentTime - lastUpdateTime) / 1000f
+            endScreenTimer += endDeltaTime
+            // END 상태에서는 lastUpdateTime을 현재 시간으로 계속 업데이트하여 deltaTime 누적을 방지합니다.
+            lastUpdateTime = currentTime
+        } else if (gameState == GameState.READY || gameState == GameState.PAUSED) {
+            // READY나 PAUSED 상태에서는 deltaTime 누적 방지를 위해 lastUpdateTime을 계속 재설정합니다.
+            lastUpdateTime = currentTime
         }
-
-        // PAUSED 상태인 경우 로직 실행 중단
-        if (gameState != GameState.RUNNING) return
-
-
-        // 3. RUNNING 상태일 때 게임 로직 실행
-
-        // ⭐ 스테이지 데이터의 스폰 간격 사용
-        spawnTimer += deltaTime
-        if (spawnTimer >= currentStageData.spawnInterval) {
-            spawnSparrow()
-            spawnTimer = 0f
-        }
-
-        // 모든 활성 오브젝트 업데이트
-        for (obj in activeObjects) {
-            obj.update(deltaTime)
-        }
-
-        // 화면 밖 오브젝트 제거
-        activeObjects.removeAll { it.isOffScreen() }
     }
 
 
+    /**
+     * 게임 종료 시 호출됩니다. 성공/실패 여부를 결정합니다.
+     */
+    private fun endGame() {
+        gameState = GameState.END
+        isStageSuccess = scoreManager.score >= currentStageData.targetScore
+        Log.d("GameEngine", "Game Ended. Success: $isStageSuccess, Final Score: ${scoreManager.score}")
+    }
+
+    // =======================================================
+    // 4. 터치 처리
+    // =======================================================
+
+    /**
+     * 사용자의 터치 입력을 처리합니다.
+     * @param x 터치 X 좌표
+     * @param y 터치 Y 좌표
+     */
+    fun handleTouch(x: Float, y: Float) {
+        when (gameState) {
+            GameState.READY -> {
+                // READY 상태에서는 아무 곳이나 터치하면 게임 시작
+                gameState = GameState.RUNNING
+                // 게임 시작 시 타이머 리셋
+                lastUpdateTime = System.currentTimeMillis()
+            }
+
+            GameState.RUNNING -> {
+                // 일시정지 버튼 처리
+                if (pauseButtonBounds?.contains(x.toInt(), y.toInt()) == true) {
+                    gameState = GameState.PAUSED
+                    return
+                }
+
+                // 새 오브젝트 터치 처리
+                val iterator = activeObjects.iterator()
+                while (iterator.hasNext()) {
+                    val obj = iterator.next()
+                    if (obj.checkHit(x, y)) {
+                        onObjectHit?.invoke(obj)
+                        iterator.remove() // 명중한 새 제거
+                        return
+                    }
+                }
+            }
+
+            GameState.PAUSED -> {
+                // RESUME 버튼 (임시로 prevStageButtonBounds 사용) 처리
+                if (prevStageButtonBounds?.contains(x.toInt(), y.toInt()) == true) {
+                    gameState = GameState.RUNNING
+                    // 일시 정지 해제 시 타이머 리셋
+                    lastUpdateTime = System.currentTimeMillis()
+                }
+            }
+
+            GameState.END -> {
+                // END 상태에서는 일정 시간 이후에만 버튼 터치 허용 (깜빡임 방지)
+                if (endScreenTimer < FADE_DURATION) return
+
+                // RETRY 버튼 (왼쪽: prevStageButtonBounds) 처리: 현재 스테이지 다시 로드
+                if (prevStageButtonBounds?.contains(x.toInt(), y.toInt()) == true) {
+                    loadStage(currentStageIndex)
+                    gameState = GameState.READY // READY 상태로 재시작 준비
+                    return
+                }
+
+                // NEXT/RETRY 버튼 (오른쪽: nextStageButtonBounds) 처리
+                if (nextStageButtonBounds?.contains(x.toInt(), y.toInt()) == true) {
+                    if (isStageSuccess) {
+                        // 성공: 다음 스테이지 로드
+                        // **오류 수정 부분 2:** StageManager 객체에 hasNextStage 함수가 정의되어 있어야 합니다.
+                        if (StageManager.hasNextStage(currentStageIndex)) {
+                            loadStage(currentStageIndex + 1)
+                        } else {
+                            // 마지막 스테이지 성공 시, 현재 스테이지 다시 로드
+                            loadStage(currentStageIndex)
+                        }
+                        gameState = GameState.READY // READY 상태로 재시작 준비
+                    } else {
+                        // 실패: 현재 스테이지 다시 로드
+                        loadStage(currentStageIndex)
+                        gameState = GameState.READY // READY 상태로 재시작 준비
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    // =======================================================
+    // 5. 그리기 (GameView에서 호출)
+    // =======================================================
+
+    /**
+     * 모든 활성화된 게임 오브젝트를 캔버스에 그립니다.
+     */
     fun draw(canvas: Canvas) {
-        canvas.drawColor(Color.BLACK)
-        for (obj in activeObjects) {
+        activeObjects.forEach { obj ->
             obj.draw(canvas)
         }
     }
 
-    fun addObject(obj: GameObject) {
-        activeObjects.add(obj)
-    }
+    // =======================================================
+    // 6. 스폰 로직
+    // =======================================================
 
     /**
-     * 터치 이벤트 처리: 터치 좌표에 오브젝트가 있는지 확인하고 처리합니다.
+     * Sparrow, Bunting, Magpie 중 하나를 랜덤으로 생성하여 activeObjects 리스트에 추가합니다.
+     * 스폰 확률: 참새(Sparrow) 60%, 멧새(Bunting) 25%, 까치(Magpie) 15%
+     * @param sparrowSpeed 참새에게 적용할 이동 속도
+     * @param buntingSpeed 멧새에게 적용할 이동 속도
+     * @param magpieSpeed 까치에게 적용할 이동 속도
      */
-    fun handleTouch(touchX: Float, touchY: Float) {
-        // 게임 종료 상태일 경우: 버튼 터치 처리
-        if (gameState == GameState.END) {
-
-            // 1. Restart 버튼 (보통 왼쪽 버튼 - 현재 스테이지 재도전)
-            if (restartBounds?.contains(touchX.toInt(), touchY.toInt()) == true) {
-                resetCurrentStage() // 현재 스테이지 재시작
-                return
-            }
-
-            // 2. Next Stage/Retry 버튼 (보통 오른쪽 버튼)
-            if (nextStageBounds?.contains(touchX.toInt(), touchY.toInt()) == true) {
-                if (isStageSuccess) {
-                    // 성공: 다음 스테이지로 이동
-                    loadNextStage()
-                } else {
-                    // 실패: 현재 스테이지 재도전
-                    resetCurrentStage()
-                }
-                return
-            }
+    private fun spawnBird(sparrowSpeed: Float, buntingSpeed: Float, magpieSpeed: Float) {
+        if (birdBitmaps.isEmpty()) {
+            Log.w("GameEngine", "Bird Bitmaps are empty, cannot spawn.")
             return
         }
 
-        if (gameState != GameState.RUNNING) return
-
-        // 오브젝트 히트 처리
-        for (i in activeObjects.indices.reversed()) {
-            val obj = activeObjects[i]
-            if (obj.checkHit(touchX, touchY)) {
-                onObjectHit?.invoke(obj)
-                activeObjects.removeAt(i)
-                return
+        val rand = Random.nextInt(100) // 0 ~ 99
+        val bird: GameObject = when {
+            // 60% 확률로 참새 (Sparrow)
+            rand < 60 -> {
+                val bitmap = birdBitmaps[SPARROW_ID]!!
+                Sparrow(screenWidth, screenHeight, bitmap, sparrowSpeed, objectStartY)
+            }
+            // 25% 확률로 멧새 (Bunting)
+            rand < 85 -> {
+                val bitmap = birdBitmaps[BUNTING_ID]!!
+                Bunting(screenWidth, screenHeight, bitmap, buntingSpeed, objectStartY)
+            }
+            // 15% 확률로 까치 (Magpie)
+            else -> {
+                val bitmap = birdBitmaps[MAGPIE_ID]!!
+                Magpie(screenWidth, screenHeight, bitmap, magpieSpeed, objectStartY)
             }
         }
-    }
-
-    /**
-     * Sparrow 객체를 생성하여 activeObjects 리스트에 추가합니다.
-     */
-    private fun spawnSparrow() {
-        // ⭐ FIX: Sparrow 생성자에 speed 인자를 전달합니다.
-        // StageData에서 가져온 속도를 사용합니다.
-        val speed = currentStageData.sparrowSpeed
-        val sparrow = Sparrow(screenWidth, screenHeight, sparrowBitmap, speed) // speed 인자 전달
-        activeObjects.add(sparrow)
-    }
-
-    /**
-     * 게임 상태를 초기화하고 재시작합니다. (Stage 1 로드)
-     */
-    fun resetGame() {
-        loadStage(1)
-    }
-
-    /**
-     * 게임 결과 처리 함수: 성공 여부 판단 및 최고 점수 갱신
-     */
-    private fun processGameResult() {
-        // 1. 성공/실패 판단
-        isStageSuccess = scoreManager.score >= scoreManager.targetScore
-
-        // 2. 최고 점수 갱신 및 저장 로직
-        if (scoreManager.score > highestScore) {
-            highestScore = scoreManager.score
-            saveHighestScore(highestScore)
-        }
-    }
-
-    /**
-     * GameView에서 버튼 영역을 설정할 함수
-     */
-    fun setButtonBounds(restart: Rect?, nextStage: Rect?) {
-        restartBounds = restart
-        nextStageBounds = nextStage
-    }
-
-    /**
-     * 최고 점수 로드
-     */
-    private fun loadHighestScore() {
-        highestScore = prefs.getInt(HIGH_SCORE_KEY, 0)
-    }
-
-    /**
-     * 최고 점수 저장
-     */
-    private fun saveHighestScore(score: Int) {
-        prefs.edit().putInt(HIGH_SCORE_KEY, score).apply()
+        activeObjects.add(bird)
     }
 }
