@@ -9,14 +9,15 @@ import kotlin.random.Random
 class Sparrow(
     private val screenWidth: Int,
     private val screenHeight: Int,
-    private val bitmap: Bitmap // ⬅️ 이 Bitmap 인자가 추가되어야 합니다!
+    private val bitmap: Bitmap,
+    private val speed: Float // ⭐ 6.4 스테이지 난이도를 위해 추가된 속도 인자
 ) : GameObject {
 
     // x, y는 참새 이미지의 중심 좌표가 됩니다.
     private var x: Float
     private var y: Float
 
-    private val speed = 500f // 초당 500 픽셀 이동
+    // private val speed = 500f // ⬅️ 스테이지 데이터에서 받은 speed 인자로 대체되었으므로, 이 고정 값은 제거합니다.
     private var angle: Float
 
     // Bitmap의 크기를 사용하여 충돌 판정 크기로 사용
@@ -53,7 +54,10 @@ class Sparrow(
     }
 
     override fun update(deltaTime: Float) {
+        // (속도 * cos(각도)) * 델타타임 -> x축 이동
+        // ⭐ 생성자에서 받은 speed 변수를 사용합니다.
         x += (speed * cos(angle)) * deltaTime
+        // (속도 * sin(각도)) * 델타타임 -> y축 이동
         y += (speed * sin(angle)) * deltaTime
     }
 
